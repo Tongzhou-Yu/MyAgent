@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Assistant</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            -webkit-user-select: none;
+            user-select: none;
+            overflow: hidden;
+        }
+
+        /* 顶部区域 */
+        #header {
+            display: flex;
+            height: 36px;
+            background: #2a2a2a;
+            -webkit-app-region: drag;
+            /* 整个顶部区域可拖动 */
+        }
+
+        /* 标签容器 */
+        #tabs {
+            display: flex;
+            flex: 1;
+            gap: 2px;
+            padding: 4px;
+        }
+
+        .tab {
+            flex: 1;
+            height: 100%;
+            background: #3a3a3a;
+            border: none;
+            color: #ffffff;
+            cursor: pointer;
+            font-size: 12px;
+            border-radius: 3px;
+            -webkit-app-region: no-drag;
+            /* 标签按钮不可拖动 */
+            transition: background-color 0.2s;
+        }
+
+        .tab:hover {
+            background: #454545;
+        }
+
+        .tab.active {
+            background: #4a4a4a;
+            font-weight: bold;
+        }
+
+        /* 拖动手柄 - 额外的可拖动区域 */
+        #drag-handle {
+            width: 16px;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-size: 10px;
+        }
+
+        #content {
+            height: calc(100vh - 36px - 28px);
+            position: relative;
+        }
+
+        /* 缩放控制区域 */
+        #zoom-control {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 28px;
+            background: #2a2a2a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 12px;
+            z-index: 1000;
+        }
+
+        .zoom-buttons {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        #zoom-control button {
+            width: 24px;
+            height: 24px;
+            border: none;
+            background: #3a3a3a;
+            color: white;
+            border-radius: 3px;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            -webkit-app-region: no-drag;
+            /* 确保按钮不可拖动 */
+        }
+
+        #zoom-control button:hover {
+            background: #4a4a4a;
+        }
+
+        #zoom-input {
+            width: 50px;
+            height: 20px;
+            background: #3a3a3a;
+            border: 1px solid #555;
+            color: white;
+            text-align: center;
+            border-radius: 3px;
+            font-size: 12px;
+            -webkit-app-region: no-drag;
+            /* 确保输入框不可拖动 */
+        }
+
+        /* 最小化模式 */
+        body.minimized #content,
+        body.minimized #zoom-control {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="header">
+        <div id="drag-handle">⋮</div>
+        <div id="tabs">
+            <button class="tab active" data-service="deepseek">DeepSeek</button>
+            <button class="tab" data-service="kimi">Kimi</button>
+            <button class="tab" data-service="mita">秘塔</button>
+        </div>
+        <div id="drag-handle">⋮</div>
+    </div>
+    <div id="content"></div>
+    <div id="zoom-control">
+        <div class="zoom-buttons">
+            <button id="zoom-out">-</button>
+            <input type="text" id="zoom-input" value="100%" aria-label="缩放比例" title="缩放比例">
+            <button id="zoom-in">+</button>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        const remote = require('@electron/remote');
+
+        // 设置默认缩放为100%
+        let currentZoom = 1.0;
+        let isMinimized = false;
+        let currentService = 'deepseek';
+
+        // 初始化标签点击事件
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function () {
+                const service = this.getAttribute('data-service');
+                console.log('Tab clicked:', service);
+
+                // 直接调用主进程方法
+                if (service === currentService && !isMinimized) {
+                    remote.getGlobal('toggleMinimize')();
+                } else {
+                    if (isMinimized) {
+                        remote.getGlobal('toggleMinimize')();
+                    }
+                    remote.getGlobal('switchView')(service);
+                }
+            });
+        });
+
+        // 监听标签变化
+        ipcRenderer.on('tab-changed', (event, { service, zoomFactor }) => {
+            console.log('Tab changed to:', service, 'zoom:', zoomFactor);
+            currentService = service;
+
+            // 更新激活的标签
+            document.querySelectorAll('.tab').forEach(tab => {
+                if (tab.getAttribute('data-service') === service) {
+                    tab.classList.add('active');
+                } else {
+                    tab.classList.remove('active');
+                }
+            });
+
+            // 更新缩放比例
+            if (zoomFactor) {
+                currentZoom = zoomFactor;
+                zoomInput.value = `${Math.round(currentZoom * 100)}%`;
+            }
+        });
+
+        // 监听缩放变化事件
+        ipcRenderer.on('zoom-changed', (event, { zoomFactor }) => {
+            console.log('Zoom changed to:', zoomFactor);
+            currentZoom = zoomFactor;
+            zoomInput.value = `${Math.round(currentZoom * 100)}%`;
+        });
+
+        // 监听窗口状态变化
+        ipcRenderer.on('window-state-change', (event, { isMinimized: minimized }) => {
+            console.log('Window state changed:', minimized);
+            isMinimized = minimized;
+            document.body.classList.toggle('minimized', minimized);
+        });
+
+        // 缩放控制 - 按钮
+        document.getElementById('zoom-in').addEventListener('click', () => {
+            setZoom(Math.min(currentZoom + 0.1, 1.5));
+        });
+
+        document.getElementById('zoom-out').addEventListener('click', () => {
+            setZoom(Math.max(currentZoom - 0.1, 0.3));
+        });
+
+        // 缩放控制 - 输入框
+        const zoomInput = document.getElementById('zoom-input');
+        // 设置初始值为100%
+        zoomInput.value = '100%';
+
+        zoomInput.addEventListener('change', () => {
+            let value = zoomInput.value.replace('%', '');
+            value = parseFloat(value) / 100;
+            if (!isNaN(value) && value >= 0.3 && value <= 1.5) {
+                setZoom(value);
+            } else {
+                zoomInput.value = `${Math.round(currentZoom * 100)}%`;
+            }
+        });
+
+        // 缩放控制 - 键盘快捷键
+        document.addEventListener('keydown', (event) => {
+            // Ctrl+加号 放大
+            if (event.ctrlKey && (event.key === '+' || event.key === '=')) {
+                setZoom(Math.min(currentZoom + 0.1, 1.5));
+            }
+            // Ctrl+减号 缩小
+            else if (event.ctrlKey && event.key === '-') {
+                setZoom(Math.max(currentZoom - 0.1, 0.3));
+            }
+            // Ctrl+0 重置
+            else if (event.ctrlKey && event.key === '0') {
+                setZoom(1.0);
+            }
+        });
+
+        // 设置缩放
+        function setZoom(value) {
+            currentZoom = value;
+            remote.getGlobal('setZoom')(currentZoom);
+            zoomInput.value = `${Math.round(currentZoom * 100)}%`;
+        }
+    </script>
+</body>
+
+</html>
